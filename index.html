@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>态势推演沙盘 Demo（MapLibre + GitHub Pages）</title>
+
+  <link href="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.css" rel="stylesheet" />
+  <script src="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.js"></script>
+
+  <style>
+    :root { --panel: 360px; }
+    body { margin:0; font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",Arial; }
+    #wrap { display:flex; height:100vh; width:100vw; }
+    #panel {
+      width: var(--panel);
+      border-right: 1px solid #e6e6e6;
+      padding: 14px 14px 10px;
+      box-sizing: border-box;
+      overflow:auto;
+    }
+    #map { flex:1; }
+    h1 { font-size: 16px; margin: 0 0 10px; }
+    .sec { margin: 12px 0; padding: 10px; border: 1px solid #eee; border-radius: 10px; }
+    .sec-title { font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+    .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    label { font-size: 12px; color:#333; }
+    select, input[type="range"] {
+      width: 100%;
+      padding: 8px;
+      box-sizing: border-box;
+    }
+    .hint { font-size: 12px; color:#666; line-height: 1.4; }
+    .pill { display:inline-block; padding:2px 8px; border-radius:999px; background:#f3f4f6; font-size:12px; margin-right:6px; }
+    #stat { font-size: 12px; color:#111; }
+    .btn {
+      padding:8px 10px; border:1px solid #ddd; border-radius:10px; background:#fff;
+      cursor:pointer; font-size:12px;
+    }
+    .btn:active { transform: translateY(1px); }
+  </style>
+</head>
+
+<body>
+<div id="wrap">
+  <div id="panel">
+    <h1>态势推演沙盘（中文版点位）</h1>
+    <div class="hint">
+      说明：本 Demo 展示“事实回放”能力（时间轴 + 筛选 + 点位详情）。后续可叠加“推演层（虚线/半透明）”与“事件簇（Cluster）”。
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">时间回放（按天）</div>
+      <div class="row" style="justify-content:space-between">
+        <span class="pill" id="dateLabel">加载中…</span>
+        <button class="btn" id="playBtn">播放</button>
+        <button class="btn" id="pauseBtn">暂停</button>
+      </div>
+      <input id="timeRange" type="range" min="0" max="0" value="0" step="1" />
+      <div class="hint">拖动滑块：只显示“开始时间 ≤ 当前日期”的事件点位。</div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">筛选</div>
+
+      <label>事件类型</label>
+      <select id="typeSel">
+        <option value="ALL">全部</option>
+      </select>
+
+      <div style="height:8px"></div>
+
+      <label>主体（包含任一主体）</label>
+      <select id="actorSel">
+        <option value="ALL">全部</option>
+        <option value="中国">中国</option>
+        <option value="日本">日本</option>
+        <option value="澳大利亚">澳大利亚</option>
+        <option value="美国">美国</option>
+        <option value="俄罗斯">俄罗斯</option>
+      </select>
+
+      <div style="height:10px"></div>
+      <div id="stat">加载中…</div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">地图操作</div>
+      <div class="hint">
+        鼠标滚轮缩放；按住右键拖动旋转；点击点位查看详情弹窗。
+      </div>
+    </div>
+  </div>
+
+  <div id="map"></div>
+</div>
+
+<script>
+  const GEOJSON_URL = './events_90d_zh.geojson';
+
+  // 1) 初始化地图（使用 MapLibre 官方 Demo 样式源）
+  const map = new maplibregl.Map({
+    container: 'map',
+    style: 'https://demotiles.maplibre.org/style.json',
+    center: [125, 25],
+    zoom: 3
+  });
+
+  // 基础控件（缩放）
+  map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
+
+  // 内存数据
+  let allData = null;
+  let allDates = [];      // 排序后的日期数组（YYYY-MM-DD）
+  let currentDate = null; // 当前滑块日期
+  let playTimer = null;
+
+  const elDateLabel = document.getElementById('dateLabel');
+  const elTimeRange = document.getElementById('timeRange');
+  const elTypeSel = document.getElementById('typeSel');
+  const elActorSel = document.getElementById('actorSel');
+  const elStat = document.getElementById('stat');
+
+  function uniq(arr) {
+    return Array.from(new Set(arr));
+  }
+
+  function toDateStr(v) {
+    // 允许 "2025-12-11" 或 "2025-12-11T00:00:00Z"
+    if (!v) return null;
+    return String(v).slice(0, 10);
+  }
+
+  function getProps(feature) {
+    // 兼容中文字段
+    return feature.properties || {};
+  }
+
+  function computeDates(data) {
+    const dates = data.features
+      .map(f => toDateStr(getProps(f)['开始时间']))
+      .filter(Boolean);
+    const sorted = uniq(dates).sort(); // YYYY-MM-DD 字符串可直接排序
+    return sorted;
+  }
+
+  function populateTypeOptions(data) {
+    const types = uniq(data.features.map(f => getProps(f)['类型']).filter(Boolean)).sort();
+    for (const t of types) {
+      const opt = document.createElement('option');
+      opt.value = t;
+      opt.textContent = t;
+      elTypeSel.appendChild(opt);
+    }
+  }
+
+  function colorByTypeExpr() {
+    // MapLibre 表达式：按“类型”上色
+    // 你可以按需要继续补充更多类型
+    return [
+      'match',
+      ['get', '类型'],
+      '空中接触', '#ff6b6b',
+      '海军编队', '#4dabf7',
+      '海警巡航', '#51cf66',
+      '例行航渡', '#fcc419',
+      '联合演训/外交交涉', '#a78bfa',
+      '#e63946'
+    ];
+  }
+
+  function applyFilters() {
+    if (!map.getLayer('event-points')) return;
+
+    const typeVal = elTypeSel.value;
+    const actorVal = elActorSel.value;
+
+    const filters = ['all'];
+
+    // 时间：开始时间 <= currentDate
+    if (currentDate) {
+      filters.push(['<=', ['slice', ['to-string', ['get', '开始时间']], 0, 10], currentDate]);
+    }
+
+    // 类型筛选
+    if (typeVal !== 'ALL') {
+      filters.push(['==', ['get', '类型'], typeVal]);
+    }
+
+    // 主体筛选：主体字段是数组/字符串都兼容（这里用字符串包含判断）
+    if (actorVal !== 'ALL') {
+      // 你的 GeoJSON 里 “主体” 多数是数组，浏览器会渲染为 "澳大利亚,中国" 之类的字符串
+      filters.push(['in', actorVal, ['to-string', ['get', '主体']]]);
+    }
+
+    map.setFilter('event-points', filters);
+    updateStat();
+  }
+
+  function updateStat() {
+    // 统计当前筛选后可见要素数量（简化：在前端按同样条件过滤一遍）
+    if (!allData || !currentDate) return;
+
+    const typeVal = elTypeSel.value;
+    const actorVal = elActorSel.value;
+
+    const visible = allData.features.filter(f => {
+      const p = getProps(f);
+      const d = toDateStr(p['开始时间']);
+      if (!d || d > currentDate) return false;
+      if (typeVal !== 'ALL' && p['类型'] !== typeVal) return false;
+      if (actorVal !== 'ALL') {
+        const s = String(p['主体'] ?? '');
+        if (!s.includes(actorVal)) return false;
+      }
+      return true;
+    });
+
+    elStat.textContent = `当前显示：${visible.length} 条事件（截至 ${currentDate}）`;
+  }
+
+  function setCurrentDateByIndex(idx) {
+    if (!allDates.length) return;
+    const safe = Math.max(0, Math.min(idx, allDates.length - 1));
+    currentDate = allDates[safe];
+    elDateLabel.textContent = `当前回放：${currentDate}`;
+    elTimeRange.value = String(safe);
+    applyFilters();
+  }
+
+  function startPlay() {
+    if (playTimer) return;
+    playTimer = setInterval(() => {
+      const i = Number(elTimeRange.value);
+      if (i >= allDates.length - 1) {
+        stopPlay();
+        return;
+      }
+      setCurrentDateByIndex(i + 1);
+    }, 900); // 每 0.9 秒推进一天（可调）
+  }
+
+  function stopPlay() {
+    if (playTimer) clearInterval(playTimer);
+    playTimer = null;
+  }
+
+  document.getElementById('playBtn').addEventListener('click', startPlay);
+  document.getElementById('pauseBtn').addEventListener('click', stopPlay);
+
+  elTimeRange.addEventListener('input', () => {
+    stopPlay();
+    setCurrentDateByIndex(Number(elTimeRange.value));
+  });
+
+  elTypeSel.addEventListener('change', applyFilters);
+  elActorSel.addEventListener('change', applyFilters);
+
+  async function loadGeoJSON() {
+    const res = await fetch(GEOJSON_URL, { cache: 'no-store' });
+    if (!res.ok) throw new Error('GeoJSON 加载失败：' + res.status);
+    return await res.json();
+  }
+
+  map.on('load', async () => {
+    try {
+      allData = await loadGeoJSON();
+      allDates = computeDates(allData);
+
+      populateTypeOptions(allData);
+
+      // 初始化时间轴
+      elTimeRange.min = 0;
+      elTimeRange.max = Math.max(0, allDates.length - 1);
+      elTimeRange.step = 1;
+
+      // 添加数据源
+      map.addSource('events', {
+        type: 'geojson',
+        data: allData
+      });
+
+      // 添加点位图层
+      map.addLayer({
+        id: 'event-points',
+        type: 'circle',
+        source: 'events',
+        paint: {
+          'circle-radius': 6,
+          'circle-color': colorByTypeExpr(),
+          'circle-stroke-width': 1,
+          'circle-stroke-color': '#ffffff',
+          'circle-opacity': 0.92
+        }
+      });
+
+      // 点击点位弹出中文详情
+      map.on('click', 'event-points', (e) => {
+        const f = e.features[0];
+        const p = getProps(f);
+        const title = p['标题'] || '未命名事件';
+        const time = toDateStr(p['开始时间']) || '';
+        const typ  = p['类型'] || '';
+        const actor = p['主体'] || '';
+        const summary = p['摘要'] || '';
+
+        new maplibregl.Popup({ closeButton: true, maxWidth: '360px' })
+          .setLngLat(e.lngLat)
+          .setHTML(`
+            <div style="font-size:13px;line-height:1.5">
+              <div style="font-weight:700;margin-bottom:4px">${title}</div>
+              <div style="color:#555;margin-bottom:6px">时间：${time} ｜ 类型：${typ}</div>
+              <div style="color:#555;margin-bottom:6px">主体：${actor}</div>
+              <div style="color:#111">${summary}</div>
+            </div>
+          `)
+          .addTo(map);
+      });
+
+      map.on('mouseenter', 'event-points', () => map.getCanvas().style.cursor = 'pointer');
+      map.on('mouseleave', 'event-points', () => map.getCanvas().style.cursor = '');
+
+      // 默认定位到最后一天（最符合“近90天态势”直觉）
+      setCurrentDateByIndex(allDates.length - 1);
+
+    } catch (err) {
+      console.error(err);
+      elDateLabel.textContent = '加载失败';
+      elStat.textContent = 'GeoJSON 加载失败：请确认 events_90d_zh.geojson 已上传且与 index.html 同目录。';
+    }
+  });
+</script>
+</body>
+</html>
