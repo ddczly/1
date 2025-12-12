@@ -3,332 +3,679 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>态势推演沙盘 Demo（MapLibre + GitHub Pages）</title>
+  <title>态势推演沙盘（HUD + 时间轴 + 推演模式）</title>
 
   <link href="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.css" rel="stylesheet" />
   <script src="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.js"></script>
 
   <style>
-    :root { --panel: 360px; }
-    body { margin:0; font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",Arial; }
-    #wrap { display:flex; height:100vh; width:100vw; }
-    #panel {
-      width: var(--panel);
-      border-right: 1px solid #e6e6e6;
-      padding: 14px 14px 10px;
-      box-sizing: border-box;
+    :root{
+      --hud: rgba(0,0,0,.55);
+      --hud-border: rgba(0,255,180,.25);
+      --mint: #7fffd4;
+      --text: #e6fff7;
+      --muted: #9adfd0;
+      --alert: #ff4d4f;
+    }
+
+    html, body{ margin:0; height:100%; background:#000; }
+    #map{ width:100vw; height:100vh; filter: brightness(.78) contrast(1.18) saturate(.86); }
+
+    /* ===== HUD 顶栏 ===== */
+    #hud-topbar{
+      position:fixed; left:12px; right:12px; top:10px; z-index:9999;
+      display:flex; gap:10px; align-items:center; pointer-events:none;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      color:var(--mint); font-size:12px;
+    }
+    .hud-pill{
+      padding:6px 10px; border:1px solid var(--hud-border);
+      background:rgba(0,0,0,.45); border-radius:10px;
+    }
+    #hud-clock{
+      margin-left:auto;
+      padding:6px 10px; border:1px solid var(--hud-border);
+      background:rgba(0,0,0,.55); border-radius:10px;
+      color:var(--text);
+    }
+
+    /* ===== HUD 覆盖层：网格 + 扫描线 ===== */
+    #hud-grid{
+      position:fixed; inset:0; z-index:9997; pointer-events:none;
+      background-image:
+        linear-gradient(rgba(0,255,180,.08) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,255,180,.08) 1px, transparent 1px);
+      background-size: 40px 40px;
+      mix-blend-mode: screen;
+      opacity:.35;
+    }
+    #hud-scanline{
+      position:fixed; inset:-200% 0 0 0; z-index:9998; pointer-events:none;
+      background: linear-gradient(to bottom, transparent 0%, rgba(0,255,180,.10) 50%, transparent 100%);
+      height:120px;
+      animation: scan 6s linear infinite;
+      opacity:.35;
+    }
+    @keyframes scan{
+      from{ transform: translateY(-30vh); }
+      to{ transform: translateY(130vh); }
+    }
+
+    /* ===== 左侧情报面板 ===== */
+    #intel-panel{
+      position:fixed;
+      left:16px;
+      top:70px;
+      width:340px;
+      max-height:74vh;
+      z-index:9999;
+      background:var(--hud);
+      border:1px solid var(--hud-border);
+      border-radius:14px;
+      padding:14px;
+      backdrop-filter: blur(6px);
+      color:var(--text);
+      font-size:12px;
+      overflow:hidden;
+    }
+    .intel-title{
+      font-size:14px;
+      font-weight:700;
+      letter-spacing:.08em;
+      margin-bottom:6px;
+      color:var(--mint);
+      font-family: ui-monospace, monospace;
+    }
+    .intel-sub{ color:var(--muted); margin-bottom:10px; }
+
+    .intel-row{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:10px; }
+    .btn{
+      padding:8px 10px;
+      border:1px solid rgba(255,255,255,.12);
+      background:rgba(0,0,0,.45);
+      color:var(--text);
+      border-radius:10px;
+      font-size:12px;
+      cursor:pointer;
+      user-select:none;
+    }
+    .btn:hover{ border-color: rgba(127,255,212,.35); }
+    .btn-active{
+      border-color: rgba(127,255,212,.65);
+      box-shadow: 0 0 0 1px rgba(127,255,212,.18) inset;
+    }
+    .range{
+      width:100%;
+      accent-color: var(--mint);
+    }
+    .small{ color:var(--muted); font-size:12px; }
+
+    .intel-section{
+      border-top:1px solid rgba(0,255,180,.18);
+      padding-top:10px;
+      margin-top:10px;
+    }
+    .intel-sec-title{
+      color:var(--mint);
+      margin-bottom:6px;
+      font-family: ui-monospace, monospace;
+    }
+    #eventLog{
+      max-height:280px;
       overflow:auto;
+      font-family: ui-monospace, monospace;
     }
-    #map { flex:1; }
-    h1 { font-size: 16px; margin: 0 0 10px; }
-    .sec { margin: 12px 0; padding: 10px; border: 1px solid #eee; border-radius: 10px; }
-    .sec-title { font-size: 13px; font-weight: 600; margin-bottom: 8px; }
-    .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-    label { font-size: 12px; color:#333; }
-    select, input[type="range"] {
-      width: 100%;
-      padding: 8px;
-      box-sizing: border-box;
+    .log-item{
+      padding:6px 8px;
+      border-bottom:1px solid rgba(255,255,255,.06);
+      color:#ddd;
     }
-    .hint { font-size: 12px; color:#666; line-height: 1.4; }
-    .pill { display:inline-block; padding:2px 8px; border-radius:999px; background:#f3f4f6; font-size:12px; margin-right:6px; }
-    #stat { font-size: 12px; color:#111; }
-    .btn {
-      padding:8px 10px; border:1px solid #ddd; border-radius:10px; background:#fff;
-      cursor:pointer; font-size:12px;
+    .log-alert{ color: var(--alert); }
+
+    /* ===== 地图弹出告警卡 ===== */
+    .alert-card{
+      background:rgba(120,0,0,.85);
+      border:1px solid var(--alert);
+      color:#fff;
+      padding:10px 12px;
+      border-radius:10px;
+      font-size:12px;
+      min-width:240px;
+      box-shadow:0 8px 24px rgba(0,0,0,.45);
+      font-family: ui-monospace, monospace;
     }
-    .btn:active { transform: translateY(1px); }
+
+    /* ===== 单位 Marker（国旗 + 标签 + 朝向箭头） ===== */
+    .unit-marker{
+      display:flex;
+      align-items:center;
+      gap:6px;
+      background:rgba(0,0,0,.55);
+      border:1px solid;
+      padding:6px 8px;
+      border-radius:10px;
+      backdrop-filter: blur(4px);
+      transform-origin: center;
+    }
+    .unit-marker img{ width:18px; height:18px; border-radius:3px; }
+    .unit-label{ color:var(--text); font-size:12px; white-space:nowrap; }
+    .unit-heading{
+      width:0;height:0;
+      border-left:6px solid transparent;
+      border-right:6px solid transparent;
+      border-bottom:10px solid var(--mint);
+      opacity:.9;
+      margin-right:2px;
+      transform-origin: 50% 70%;
+    }
+
+    /* 让 marker 不被 HUD 层挡住 */
+    .maplibregl-popup{ z-index: 10000; }
   </style>
 </head>
 
 <body>
-<div id="wrap">
-  <div id="panel">
-    <h1>态势推演沙盘（中文版点位）</h1>
-    <div class="hint">
-      说明：本 Demo 展示“事实回放”能力（时间轴 + 筛选 + 点位详情）。后续可叠加“推演层（虚线/半透明）”与“事件簇（Cluster）”。
+  <div id="map"></div>
+
+  <div id="hud-topbar">
+    <span class="hud-pill">TACTICAL VIEW</span>
+    <span class="hud-pill">SAT_UPLINK: STABLE</span>
+    <span class="hud-pill">OP_AREA: WEST PACIFIC</span>
+    <span id="hud-clock">--</span>
+  </div>
+  <div id="hud-grid"></div>
+  <div id="hud-scanline"></div>
+
+  <div id="intel-panel">
+    <div class="intel-title">INTELLIGENCE</div>
+    <div class="intel-sub">▶ 拖动时间轴回放；切换事实/推演；事件会自动聚焦与告警。</div>
+
+    <div class="intel-row">
+      <button id="btnFact" class="btn btn-active">事实</button>
+      <button id="btnSim" class="btn">推演</button>
+      <button id="btnPlay" class="btn">播放</button>
+      <button id="btnPause" class="btn">暂停</button>
     </div>
 
-    <div class="sec">
-      <div class="sec-title">时间回放（按天）</div>
-      <div class="row" style="justify-content:space-between">
-        <span class="pill" id="dateLabel">加载中…</span>
-        <button class="btn" id="playBtn">播放</button>
-        <button class="btn" id="pauseBtn">暂停</button>
-      </div>
-      <input id="timeRange" type="range" min="0" max="0" value="0" step="1" />
-      <div class="hint">拖动滑块：只显示“开始时间 ≤ 当前日期”的事件点位。</div>
-    </div>
+    <div class="small" id="modeHint">模式：事实（实线航迹）</div>
+    <div style="height:8px"></div>
+    <input id="timeRange" class="range" type="range" min="0" max="1000" step="1" value="1000" />
+    <div class="small" id="timeLabel">时间：--</div>
 
-    <div class="sec">
-      <div class="sec-title">筛选</div>
-
-      <label>事件类型</label>
-      <select id="typeSel">
-        <option value="ALL">全部</option>
-      </select>
-
-      <div style="height:8px"></div>
-
-      <label>主体（包含任一主体）</label>
-      <select id="actorSel">
-        <option value="ALL">全部</option>
-        <option value="中国">中国</option>
-        <option value="日本">日本</option>
-        <option value="澳大利亚">澳大利亚</option>
-        <option value="美国">美国</option>
-        <option value="俄罗斯">俄罗斯</option>
-      </select>
-
-      <div style="height:10px"></div>
-      <div id="stat">加载中…</div>
-    </div>
-
-    <div class="sec">
-      <div class="sec-title">地图操作</div>
-      <div class="hint">
-        鼠标滚轮缩放；按住右键拖动旋转；点击点位查看详情弹窗。
-      </div>
+    <div class="intel-section">
+      <div class="intel-sec-title">EVENT LOG</div>
+      <div id="eventLog"></div>
     </div>
   </div>
 
-  <div id="map"></div>
-</div>
-
 <script>
-  const GEOJSON_URL = './events_90d_zh.geojson';
-
-  // 1) 初始化地图（使用 MapLibre 官方 Demo 样式源）
+  /* ========= 0) 基础：MapLibre 初始化 ========= */
   const map = new maplibregl.Map({
-    container: 'map',
-    style: 'https://demotiles.maplibre.org/style.json',
-    center: [125, 25],
-    zoom: 3
+    container: "map",
+    style: "https://demotiles.maplibre.org/style.json",
+    center: [125, 22],
+    zoom: 4
   });
+  map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
 
-  // 基础控件（缩放）
-  map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
+  /* ========= 1) 类型样式（舰/机/海警/商船） ========= */
+  const TYPE_STYLE = {
+    ship:       { color:"#ff4d4f", label:"舰" },
+    aircraft:   { color:"#ffa940", label:"机" },
+    coastguard: { color:"#52c41a", label:"海警" },
+    merchant:   { color:"#40a9ff", label:"商船" }
+  };
 
-  // 内存数据
-  let allData = null;
-  let allDates = [];      // 排序后的日期数组（YYYY-MM-DD）
-  let currentDate = null; // 当前滑块日期
-  let playTimer = null;
+  /* ========= 2) 工具函数：时间/插值/航向 ========= */
+  const ms = (iso)=>Date.parse(iso);
+  const lerp = (a,b,t)=>a+(b-a)*t;
+  const lerpCoord = (c1,c2,t)=>[ lerp(c1[0],c2[0],t), lerp(c1[1],c2[1],t) ];
 
-  const elDateLabel = document.getElementById('dateLabel');
-  const elTimeRange = document.getElementById('timeRange');
-  const elTypeSel = document.getElementById('typeSel');
-  const elActorSel = document.getElementById('actorSel');
-  const elStat = document.getElementById('stat');
-
-  function uniq(arr) {
-    return Array.from(new Set(arr));
-  }
-
-  function toDateStr(v) {
-    // 允许 "2025-12-11" 或 "2025-12-11T00:00:00Z"
-    if (!v) return null;
-    return String(v).slice(0, 10);
-  }
-
-  function getProps(feature) {
-    // 兼容中文字段
-    return feature.properties || {};
-  }
-
-  function computeDates(data) {
-    const dates = data.features
-      .map(f => toDateStr(getProps(f)['开始时间']))
-      .filter(Boolean);
-    const sorted = uniq(dates).sort(); // YYYY-MM-DD 字符串可直接排序
-    return sorted;
-  }
-
-  function populateTypeOptions(data) {
-    const types = uniq(data.features.map(f => getProps(f)['类型']).filter(Boolean)).sort();
-    for (const t of types) {
-      const opt = document.createElement('option');
-      opt.value = t;
-      opt.textContent = t;
-      elTypeSel.appendChild(opt);
-    }
-  }
-
-  function colorByTypeExpr() {
-    // MapLibre 表达式：按“类型”上色
-    // 你可以按需要继续补充更多类型
-    return [
-      'match',
-      ['get', '类型'],
-      '空中接触', '#ff6b6b',
-      '海军编队', '#4dabf7',
-      '海警巡航', '#51cf66',
-      '例行航渡', '#fcc419',
-      '联合演训/外交交涉', '#a78bfa',
-      '#e63946'
-    ];
-  }
-
-  function applyFilters() {
-    if (!map.getLayer('event-points')) return;
-
-    const typeVal = elTypeSel.value;
-    const actorVal = elActorSel.value;
-
-    const filters = ['all'];
-
-    // 时间：开始时间 <= currentDate
-    if (currentDate) {
-      filters.push(['<=', ['slice', ['to-string', ['get', '开始时间']], 0, 10], currentDate]);
-    }
-
-    // 类型筛选
-    if (typeVal !== 'ALL') {
-      filters.push(['==', ['get', '类型'], typeVal]);
-    }
-
-    // 主体筛选：主体字段是数组/字符串都兼容（这里用字符串包含判断）
-    if (actorVal !== 'ALL') {
-      // 你的 GeoJSON 里 “主体” 多数是数组，浏览器会渲染为 "澳大利亚,中国" 之类的字符串
-      filters.push(['in', actorVal, ['to-string', ['get', '主体']]]);
-    }
-
-    map.setFilter('event-points', filters);
-    updateStat();
-  }
-
-  function updateStat() {
-    // 统计当前筛选后可见要素数量（简化：在前端按同样条件过滤一遍）
-    if (!allData || !currentDate) return;
-
-    const typeVal = elTypeSel.value;
-    const actorVal = elActorSel.value;
-
-    const visible = allData.features.filter(f => {
-      const p = getProps(f);
-      const d = toDateStr(p['开始时间']);
-      if (!d || d > currentDate) return false;
-      if (typeVal !== 'ALL' && p['类型'] !== typeVal) return false;
-      if (actorVal !== 'ALL') {
-        const s = String(p['主体'] ?? '');
-        if (!s.includes(actorVal)) return false;
+  // 根据 tMs 在带时间点列中插值位置
+  function positionAt(points, tMs){
+    if (!points?.length) return null;
+    const arr = points.map(p=>({m:ms(p.t), c:p.c})).sort((x,y)=>x.m-y.m);
+    if (tMs <= arr[0].m) return arr[0].c;
+    if (tMs >= arr[arr.length-1].m) return arr[arr.length-1].c;
+    for (let i=0;i<arr.length-1;i++){
+      const a=arr[i], b=arr[i+1];
+      if (tMs>=a.m && tMs<=b.m){
+        const r=(tMs-a.m)/((b.m-a.m)||1);
+        return lerpCoord(a.c,b.c,r);
       }
-      return true;
+    }
+    return arr[arr.length-1].c;
+  }
+
+  // 截取已走过轨迹（用于画航迹）
+  function trackSlice(points, tMs){
+    const arr = points.map(p=>({m:ms(p.t), c:p.c})).sort((x,y)=>x.m-y.m);
+    const out = [];
+    for (const p of arr){ if (p.m <= tMs) out.push(p.c); }
+    const cur = positionAt(points, tMs);
+    if (cur && (!out.length || out[out.length-1][0]!==cur[0] || out[out.length-1][1]!==cur[1])) out.push(cur);
+    return out.length>=2 ? out : null;
+  }
+
+  // 计算航向角（度）：从 c1 指向 c2
+  function bearingDeg(c1, c2){
+    const lon1 = c1[0]*Math.PI/180, lat1 = c1[1]*Math.PI/180;
+    const lon2 = c2[0]*Math.PI/180, lat2 = c2[1]*Math.PI/180;
+    const dLon = lon2 - lon1;
+    const y = Math.sin(dLon) * Math.cos(lat2);
+    const x = Math.cos(lat1)*Math.sin(lat2) - Math.sin(lat1)*Math.cos(lat2)*Math.cos(dLon);
+    let brng = Math.atan2(y, x) * 180/Math.PI;
+    brng = (brng + 360) % 360;
+    return brng;
+  }
+
+  /* ========= 3) 国旗图标（Twemoji SVG，不需要你上传图片） ========= */
+  function twemojiUrl(emoji) {
+    const codePoints = Array.from(emoji).map(ch => ch.codePointAt(0).toString(16)).join("-");
+    return `https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/svg/${codePoints}.svg`;
+  }
+
+  function makeUnitEl(unit){
+    const st = TYPE_STYLE[unit.type] || { color:"#aaa", label:"?" };
+    const el = document.createElement("div");
+    el.className = "unit-marker";
+    el.style.borderColor = st.color;
+
+    // 朝向箭头：独立元素，避免整体旋转影响文字
+    const heading = document.createElement("div");
+    heading.className = "unit-heading";
+    heading.style.borderBottomColor = st.color;
+
+    const img = document.createElement("img");
+    img.src = twemojiUrl(unit.flag);
+
+    const label = document.createElement("div");
+    label.className = "unit-label";
+    label.innerHTML = `<span style="color:${st.color};font-weight:700">[${st.label}]</span> ${unit.name}`;
+
+    el.appendChild(heading);
+    el.appendChild(img);
+    el.appendChild(label);
+
+    // 存个引用方便更新旋转
+    el._headingEl = heading;
+    return el;
+  }
+
+  /* ========= 4) 数据：事实轨迹 + 推演轨迹（示例） =========
+     你后续只需要把 pointsFact/pointsSim 换成真实数据（90天） */
+  const unitTracks = [
+    {
+      id:"us_ddg113", name:"US DDG-113", flag:"🇺🇸", type:"ship",
+      pointsFact:[
+        {t:"2025-09-13T00:00:00Z", c:[121.0, 17.0]},
+        {t:"2025-10-01T00:00:00Z", c:[123.2, 18.1]},
+        {t:"2025-11-01T00:00:00Z", c:[126.5, 20.0]},
+        {t:"2025-12-12T00:00:00Z", c:[129.2, 22.0]}
+      ],
+      pointsSim:[
+        {t:"2025-09-13T00:00:00Z", c:[121.0, 17.0]},
+        {t:"2025-10-15T00:00:00Z", c:[124.5, 18.8]},
+        {t:"2025-11-20T00:00:00Z", c:[127.2, 21.0]},
+        {t:"2025-12-12T00:00:00Z", c:[131.0, 23.2]}
+      ]
+    },
+    {
+      id:"jp_p3c", name:"P-3C", flag:"🇯🇵", type:"aircraft",
+      pointsFact:[
+        {t:"2025-10-20T00:00:00Z", c:[124.0, 20.8]},
+        {t:"2025-11-09T20:02:00Z", c:[125.4, 21.0]},
+        {t:"2025-12-10T00:00:00Z", c:[126.0, 20.7]}
+      ],
+      pointsSim:[
+        {t:"2025-10-20T00:00:00Z", c:[124.0, 20.8]},
+        {t:"2025-11-10T10:00:00Z", c:[126.2, 21.4]},
+        {t:"2025-12-10T00:00:00Z", c:[127.0, 20.9]}
+      ]
+    },
+    {
+      id:"cn_cg5402", name:"CCG 5402", flag:"🇨🇳", type:"coastguard",
+      pointsFact:[
+        {t:"2025-09-20T00:00:00Z", c:[123.0, 25.7]},
+        {t:"2025-10-25T00:00:00Z", c:[123.6, 25.9]},
+        {t:"2025-11-16T00:00:00Z", c:[123.5, 25.9]},
+        {t:"2025-12-12T00:00:00Z", c:[123.2, 25.6]}
+      ],
+      pointsSim:[
+        {t:"2025-09-20T00:00:00Z", c:[123.0, 25.7]},
+        {t:"2025-11-05T00:00:00Z", c:[124.2, 26.1]},
+        {t:"2025-12-12T00:00:00Z", c:[125.0, 26.6]}
+      ]
+    },
+    {
+      id:"mv_evergreen", name:"EVERGREEN", flag:"🇵🇦", type:"merchant",
+      pointsFact:[
+        {t:"2025-09-15T00:00:00Z", c:[118.0, 22.3]},
+        {t:"2025-10-18T00:00:00Z", c:[120.5, 20.9]},
+        {t:"2025-11-25T00:00:00Z", c:[123.0, 19.2]},
+        {t:"2025-12-12T00:00:00Z", c:[125.5, 18.0]}
+      ],
+      pointsSim:[
+        {t:"2025-09-15T00:00:00Z", c:[118.0, 22.3]},
+        {t:"2025-10-20T00:00:00Z", c:[121.8, 21.2]},
+        {t:"2025-12-12T00:00:00Z", c:[127.2, 19.0]}
+      ]
+    }
+  ];
+
+  /* ========= 5) 事件（按真实时间触发：事实/推演可共享，也可分开） ========= */
+  const scenarioEvents = [
+    { t:"2025-11-09T20:02:00Z", unitId:"jp_p3c", title:"抵近侦察", desc:"日方 P-3C 持续跟踪监视", level:"ALERT" },
+    { t:"2025-11-10T02:00:00Z", unitId:"us_ddg113", title:"海域介入", desc:"美舰 DDG-113 进入相关海域", level:"ALERT" },
+    { t:"2025-11-16T00:00:00Z", unitId:"cn_cg5402", title:"海警巡航", desc:"争议海域海警活动引发舆论升温", level:"INFO" }
+  ].map(e=>({ ...e, m: ms(e.t) }));
+
+  /* ========= 6) UI & 状态 ========= */
+  const eventLog = document.getElementById("eventLog");
+  const timeRangeEl = document.getElementById("timeRange");
+  const timeLabelEl = document.getElementById("timeLabel");
+  const modeHintEl = document.getElementById("modeHint");
+  const hudClockEl = document.getElementById("hud-clock");
+
+  const btnFact = document.getElementById("btnFact");
+  const btnSim  = document.getElementById("btnSim");
+  const btnPlay = document.getElementById("btnPlay");
+  const btnPause= document.getElementById("btnPause");
+
+  let mode = "fact";       // "fact" | "sim"
+  let playing = false;
+  let currentT = null;
+  const fired = new Set();
+
+  function addLog(text, isAlert=false){
+    const div = document.createElement("div");
+    div.className = "log-item" + (isAlert ? " log-alert" : "");
+    div.textContent = text;
+    eventLog.prepend(div);
+  }
+
+  function showAlertOnMap(lngLat, title, desc){
+    new maplibregl.Popup({ closeButton:true, closeOnClick:true, maxWidth:"320px" })
+      .setLngLat(lngLat)
+      .setHTML(`
+        <div class="alert-card">
+          <div style="font-weight:700;margin-bottom:6px">⚠ ALERT：${title}</div>
+          <div style="opacity:.95">${desc}</div>
+        </div>
+      `)
+      .addTo(map);
+  }
+
+  function setClock(tMs){
+    const d = new Date(tMs);
+    const s = d.toISOString().replace("T"," ").slice(0,19) + " UTC";
+    hudClockEl.textContent = s;
+    timeLabelEl.textContent = "时间：" + s;
+  }
+
+  function setMode(next){
+    mode = next;
+    btnFact.classList.toggle("btn-active", mode==="fact");
+    btnSim.classList.toggle("btn-active", mode==="sim");
+    modeHintEl.textContent = mode==="fact" ? "模式：事实（实线航迹）" : "模式：推演（虚线航迹）";
+
+    // 轨迹线型切换
+    if (map.getLayer("unit-trails-line")){
+      map.setPaintProperty("unit-trails-line", "line-dasharray", mode==="fact" ? [1,0] : [2,2]);
+      map.setPaintProperty("unit-trails-line", "line-opacity", mode==="fact" ? 0.75 : 0.85);
+      map.setPaintProperty("unit-trails-line", "line-color", mode==="fact" ? "#40a9ff" : "#ff4d4f");
+    }
+    // 切换后重新刷新（位置/轨迹）
+    updateAt(currentT, {refire:false});
+  }
+
+  btnFact.onclick = ()=>setMode("fact");
+  btnSim.onclick  = ()=>setMode("sim");
+  btnPlay.onclick = ()=>{ playing = true; };
+  btnPause.onclick= ()=>{ playing = false; };
+
+  /* ========= 7) 全局时间范围（从所有轨迹抽取） ========= */
+  function getAllTimes(){
+    const times=[];
+    for (const u of unitTracks){
+      const pts = (mode==="fact" ? u.pointsFact : u.pointsSim);
+      pts.forEach(p=>times.push(ms(p.t)));
+    }
+    times.sort((a,b)=>a-b);
+    return times;
+  }
+
+  /* ========= 8) 单位 Marker + 航迹 Source ========= */
+  const unitMarkers = new Map(); // id -> { marker, el }
+  const trailFC = { type:"FeatureCollection", features: [] };
+
+  function pointsForUnit(u){
+    return (mode==="fact" ? u.pointsFact : u.pointsSim);
+  }
+
+  function rebuildTrails(tMs){
+    trailFC.features = unitTracks.map(u=>{
+      const coords = trackSlice(pointsForUnit(u), tMs) || [];
+      return {
+        type:"Feature",
+        properties:{ id:u.id, name:u.name, type:u.type },
+        geometry:{ type:"LineString", coordinates: coords }
+      };
+    });
+    map.getSource("unit-trails").setData(trailFC);
+  }
+
+  // 用于事件聚焦的高亮点
+  const focusFC = { type:"FeatureCollection", features: [] };
+  let focusPulseTimer = null;
+
+  function focusPulseAt(lngLat){
+    focusFC.features = [{
+      type:"Feature",
+      properties:{},
+      geometry:{ type:"Point", coordinates:[lngLat.lng, lngLat.lat] }
+    }];
+    map.getSource("focus-point").setData(focusFC);
+
+    // 简单脉冲动画：改 circle-radius
+    let r=6, dir=1;
+    if (focusPulseTimer) clearInterval(focusPulseTimer);
+    focusPulseTimer = setInterval(()=>{
+      r += dir*1.2;
+      if (r > 26) dir = -1;
+      if (r < 8) dir = 1;
+      if (map.getLayer("focus-ring")) map.setPaintProperty("focus-ring", "circle-radius", r);
+    }, 60);
+
+    // 3秒后停止脉冲但保留一下高亮，然后淡出
+    setTimeout(()=>{
+      if (focusPulseTimer) clearInterval(focusPulseTimer);
+      focusPulseTimer = null;
+      // 逐步淡出
+      let op=0.85;
+      const fade = setInterval(()=>{
+        op -= 0.08;
+        if (op <= 0){
+          clearInterval(fade);
+          focusFC.features = [];
+          map.getSource("focus-point").setData(focusFC);
+          return;
+        }
+        if (map.getLayer("focus-ring")) map.setPaintProperty("focus-ring", "circle-opacity", op);
+      }, 80);
+    }, 3000);
+  }
+
+  function fireEventsIfNeeded(tMs){
+    // 这里：事件不区分事实/推演；如果你想区分，可给事件加 mode 字段过滤
+    scenarioEvents.forEach((ev, idx)=>{
+      if (fired.has(idx)) return;
+      if (tMs >= ev.m){
+        fired.add(idx);
+        const mk = unitMarkers.get(ev.unitId)?.marker;
+        if (!mk) return;
+        const pos = mk.getLngLat();
+
+        const isAlert = (ev.level === "ALERT");
+        addLog(`${ev.level}：${ev.title} - ${ev.desc}`, isAlert);
+        if (isAlert) showAlertOnMap(pos, ev.title, ev.desc);
+
+        // C) 事件聚焦：flyTo + 高亮脉冲
+        map.flyTo({
+          center: [pos.lng, pos.lat],
+          zoom: 6.2,
+          speed: 0.9,
+          curve: 1.2,
+          essential: true
+        });
+        focusPulseAt(pos);
+      }
+    });
+  }
+
+  /* ========= 9) 核心更新：位置/朝向/航迹/事件 ========= */
+  function updateAt(tMs, opt={refire:true}){
+    if (!tMs) return;
+    currentT = tMs;
+    setClock(tMs);
+
+    for (const u of unitTracks){
+      const pts = pointsForUnit(u);
+      const pos = positionAt(pts, tMs);
+      if (!pos) continue;
+
+      const entry = unitMarkers.get(u.id);
+      entry.marker.setLngLat(pos);
+
+      // A) 朝向：用一个小时间增量计算 bearing
+      const dt = 60 * 60 * 1000; // 1小时
+      const p1 = positionAt(pts, Math.max(tMs - dt, ms(pts[0].t)));
+      const p2 = positionAt(pts, Math.min(tMs + dt, ms(pts[pts.length-1].t)));
+      const br = (p1 && p2) ? bearingDeg(p1, p2) : 0;
+      // 只旋转箭头，不旋转文字/旗帜
+      entry.el._headingEl.style.transform = `rotate(${br}deg)`;
+    }
+
+    rebuildTrails(tMs);
+    fireEventsIfNeeded(tMs);
+  }
+
+  /* ========= 10) 时间轴（0..1000 -> tMin..tMax） & 播放 ========= */
+  function computeRange(){
+    const times = getAllTimes();
+    return { tMin: times[0], tMax: times[times.length-1] };
+  }
+  let { tMin, tMax } = computeRange();
+
+  timeRangeEl.oninput = ()=>{
+    playing = false;
+    const k = Number(timeRangeEl.value)/1000;
+    const t = tMin + (tMax - tMin) * k;
+    updateAt(t);
+  };
+
+  function loop(){
+    if (playing){
+      // 播放速度：每秒推进 6小时（可调）
+      const speedMsPerSec = 6 * 3600 * 1000;
+      currentT += speedMsPerSec / 60; // 约按 60fps
+      if (currentT >= tMax){
+        currentT = tMax;
+        playing = false;
+      }
+      const k = (currentT - tMin)/(tMax - tMin);
+      timeRangeEl.value = String(Math.round(k*1000));
+      updateAt(currentT);
+    }
+    requestAnimationFrame(loop);
+  }
+
+  /* ========= 11) 地图加载后：创建 Marker、轨迹层、高亮层 ========= */
+  map.on("load", ()=>{
+    // 轨迹层：每个单位一条线（颜色可扩展到按类型/按阵营）
+    map.addSource("unit-trails", { type:"geojson", data: trailFC });
+    map.addLayer({
+      id:"unit-trails-line",
+      type:"line",
+      source:"unit-trails",
+      paint:{
+        "line-color":"#40a9ff",
+        "line-width":2,
+        "line-opacity":0.75,
+        "line-dasharray":[1,0] // 事实=实线；推演会切成虚线
+      }
     });
 
-    elStat.textContent = `当前显示：${visible.length} 条事件（截至 ${currentDate}）`;
-  }
-
-  function setCurrentDateByIndex(idx) {
-    if (!allDates.length) return;
-    const safe = Math.max(0, Math.min(idx, allDates.length - 1));
-    currentDate = allDates[safe];
-    elDateLabel.textContent = `当前回放：${currentDate}`;
-    elTimeRange.value = String(safe);
-    applyFilters();
-  }
-
-  function startPlay() {
-    if (playTimer) return;
-    playTimer = setInterval(() => {
-      const i = Number(elTimeRange.value);
-      if (i >= allDates.length - 1) {
-        stopPlay();
-        return;
+    // 高亮层（事件聚焦脉冲）
+    map.addSource("focus-point", { type:"geojson", data: focusFC });
+    map.addLayer({
+      id:"focus-ring",
+      type:"circle",
+      source:"focus-point",
+      paint:{
+        "circle-radius": 10,
+        "circle-color": "transparent",
+        "circle-stroke-width": 2,
+        "circle-stroke-color": "#ff4d4f",
+        "circle-opacity": 0.85
       }
-      setCurrentDateByIndex(i + 1);
-    }, 900); // 每 0.9 秒推进一天（可调）
-  }
+    });
 
-  function stopPlay() {
-    if (playTimer) clearInterval(playTimer);
-    playTimer = null;
-  }
+    // 创建单位 marker
+    for (const u of unitTracks){
+      const el = makeUnitEl(u);
+      const st = TYPE_STYLE[u.type] || { color:"#aaa" };
+      el.style.borderColor = st.color;
 
-  document.getElementById('playBtn').addEventListener('click', startPlay);
-  document.getElementById('pauseBtn').addEventListener('click', stopPlay);
+      const pts = pointsForUnit(u);
+      const pos = positionAt(pts, ms(pts[0].t));
+      const marker = new maplibregl.Marker({ element: el }).setLngLat(pos).addTo(map);
 
-  elTimeRange.addEventListener('input', () => {
-    stopPlay();
-    setCurrentDateByIndex(Number(elTimeRange.value));
-  });
+      unitMarkers.set(u.id, { marker, el });
 
-  elTypeSel.addEventListener('change', applyFilters);
-  elActorSel.addEventListener('change', applyFilters);
-
-  async function loadGeoJSON() {
-    const res = await fetch(GEOJSON_URL, { cache: 'no-store' });
-    if (!res.ok) throw new Error('GeoJSON 加载失败：' + res.status);
-    return await res.json();
-  }
-
-  map.on('load', async () => {
-    try {
-      allData = await loadGeoJSON();
-      allDates = computeDates(allData);
-
-      populateTypeOptions(allData);
-
-      // 初始化时间轴
-      elTimeRange.min = 0;
-      elTimeRange.max = Math.max(0, allDates.length - 1);
-      elTimeRange.step = 1;
-
-      // 添加数据源
-      map.addSource('events', {
-        type: 'geojson',
-        data: allData
+      // 点击单位：日志提示 + 轻微聚焦
+      el.addEventListener("click", (ev)=>{
+        ev.stopPropagation();
+        const ll = marker.getLngLat();
+        addLog(`INFO：选择单位 - ${u.name}`, false);
+        map.easeTo({ center:[ll.lng,ll.lat], zoom: Math.max(map.getZoom(), 6), duration: 600 });
+        focusPulseAt(ll);
       });
-
-      // 添加点位图层
-      map.addLayer({
-        id: 'event-points',
-        type: 'circle',
-        source: 'events',
-        paint: {
-          'circle-radius': 6,
-          'circle-color': colorByTypeExpr(),
-          'circle-stroke-width': 1,
-          'circle-stroke-color': '#ffffff',
-          'circle-opacity': 0.92
-        }
-      });
-
-      // 点击点位弹出中文详情
-      map.on('click', 'event-points', (e) => {
-        const f = e.features[0];
-        const p = getProps(f);
-        const title = p['标题'] || '未命名事件';
-        const time = toDateStr(p['开始时间']) || '';
-        const typ  = p['类型'] || '';
-        const actor = p['主体'] || '';
-        const summary = p['摘要'] || '';
-
-        new maplibregl.Popup({ closeButton: true, maxWidth: '360px' })
-          .setLngLat(e.lngLat)
-          .setHTML(`
-            <div style="font-size:13px;line-height:1.5">
-              <div style="font-weight:700;margin-bottom:4px">${title}</div>
-              <div style="color:#555;margin-bottom:6px">时间：${time} ｜ 类型：${typ}</div>
-              <div style="color:#555;margin-bottom:6px">主体：${actor}</div>
-              <div style="color:#111">${summary}</div>
-            </div>
-          `)
-          .addTo(map);
-      });
-
-      map.on('mouseenter', 'event-points', () => map.getCanvas().style.cursor = 'pointer');
-      map.on('mouseleave', 'event-points', () => map.getCanvas().style.cursor = '');
-
-      // 默认定位到最后一天（最符合“近90天态势”直觉）
-      setCurrentDateByIndex(allDates.length - 1);
-
-    } catch (err) {
-      console.error(err);
-      elDateLabel.textContent = '加载失败';
-      elStat.textContent = 'GeoJSON 加载失败：请确认 events_90d_zh.geojson 已上传且与 index.html 同目录。';
     }
+
+    // 初始化时间范围与当前时间（默认最后一天）
+    ({ tMin, tMax } = computeRange());
+    currentT = tMax;
+    timeRangeEl.value = "1000";
+    updateAt(currentT);
+
+    // 初始日志
+    addLog("INFO：系统就绪 - HUD ONLINE", false);
+    addLog("INFO：提示 - 可切换事实/推演并播放时间轴", false);
+
+    // 进入主循环
+    loop();
   });
+
+  // 切换模式时，需要重算 tMin/tMax（因为 sim 的轨迹点可能不同）
+  function refreshRangeAndStay(){
+    ({ tMin, tMax } = computeRange());
+    currentT = Math.max(tMin, Math.min(currentT, tMax));
+    const k = (currentT - tMin)/(tMax - tMin);
+    timeRangeEl.value = String(Math.round(k*1000));
+    updateAt(currentT);
+  }
+
+  // 覆盖 setMode：切换后重算范围
+  const _setMode = setMode;
+  window.setMode = (m)=>{
+    _setMode(m);
+    refreshRangeAndStay();
+  };
+
+  // 让按钮切换调用 window.setMode（兼容上面覆盖）
+  btnFact.onclick = ()=>window.setMode("fact");
+  btnSim.onclick  = ()=>window.setMode("sim");
 </script>
 </body>
 </html>
