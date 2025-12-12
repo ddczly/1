@@ -1,681 +1,707 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>态势推演沙盘（HUD + 时间轴 + 推演模式）</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>态势感知沙盘系统 V3.3 (图例增强版 - 修复版)</title>
+    
+    <!-- Leaflet CSS (地图核心) -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    
+    <!-- Font Awesome (图标库) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
-  <link href="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.css" rel="stylesheet" />
-  <script src="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.js"></script>
+    <!-- Tailwind CSS (样式库) -->
+    <script src="https://cdn.tailwindcss.com"></script>
 
-  <style>
-    :root{
-      --hud: rgba(0,0,0,.55);
-      --hud-border: rgba(0,255,180,.25);
-      --mint: #7fffd4;
-      --text: #e6fff7;
-      --muted: #9adfd0;
-      --alert: #ff4d4f;
-    }
+    <!-- Google Fonts (机读字体) -->
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;700&display=swap" rel="stylesheet">
 
-    html, body{ margin:0; height:100%; background:#000; }
-    #map{ width:100vw; height:100vh; filter: brightness(.78) contrast(1.18) saturate(.86); }
-
-    /* ===== HUD 顶栏 ===== */
-    #hud-topbar{
-      position:fixed; left:12px; right:12px; top:10px; z-index:9999;
-      display:flex; gap:10px; align-items:center; pointer-events:none;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-      color:var(--mint); font-size:12px;
-    }
-    .hud-pill{
-      padding:6px 10px; border:1px solid var(--hud-border);
-      background:rgba(0,0,0,.45); border-radius:10px;
-    }
-    #hud-clock{
-      margin-left:auto;
-      padding:6px 10px; border:1px solid var(--hud-border);
-      background:rgba(0,0,0,.55); border-radius:10px;
-      color:var(--text);
-    }
-
-    /* ===== HUD 覆盖层：网格 + 扫描线 ===== */
-    #hud-grid{
-      position:fixed; inset:0; z-index:9997; pointer-events:none;
-      background-image:
-        linear-gradient(rgba(0,255,180,.08) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(0,255,180,.08) 1px, transparent 1px);
-      background-size: 40px 40px;
-      mix-blend-mode: screen;
-      opacity:.35;
-    }
-    #hud-scanline{
-      position:fixed; inset:-200% 0 0 0; z-index:9998; pointer-events:none;
-      background: linear-gradient(to bottom, transparent 0%, rgba(0,255,180,.10) 50%, transparent 100%);
-      height:120px;
-      animation: scan 6s linear infinite;
-      opacity:.35;
-    }
-    @keyframes scan{
-      from{ transform: translateY(-30vh); }
-      to{ transform: translateY(130vh); }
-    }
-
-    /* ===== 左侧情报面板 ===== */
-    #intel-panel{
-      position:fixed;
-      left:16px;
-      top:70px;
-      width:340px;
-      max-height:74vh;
-      z-index:9999;
-      background:var(--hud);
-      border:1px solid var(--hud-border);
-      border-radius:14px;
-      padding:14px;
-      backdrop-filter: blur(6px);
-      color:var(--text);
-      font-size:12px;
-      overflow:hidden;
-    }
-    .intel-title{
-      font-size:14px;
-      font-weight:700;
-      letter-spacing:.08em;
-      margin-bottom:6px;
-      color:var(--mint);
-      font-family: ui-monospace, monospace;
-    }
-    .intel-sub{ color:var(--muted); margin-bottom:10px; }
-
-    .intel-row{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:10px; }
-    .btn{
-      padding:8px 10px;
-      border:1px solid rgba(255,255,255,.12);
-      background:rgba(0,0,0,.45);
-      color:var(--text);
-      border-radius:10px;
-      font-size:12px;
-      cursor:pointer;
-      user-select:none;
-    }
-    .btn:hover{ border-color: rgba(127,255,212,.35); }
-    .btn-active{
-      border-color: rgba(127,255,212,.65);
-      box-shadow: 0 0 0 1px rgba(127,255,212,.18) inset;
-    }
-    .range{
-      width:100%;
-      accent-color: var(--mint);
-    }
-    .small{ color:var(--muted); font-size:12px; }
-
-    .intel-section{
-      border-top:1px solid rgba(0,255,180,.18);
-      padding-top:10px;
-      margin-top:10px;
-    }
-    .intel-sec-title{
-      color:var(--mint);
-      margin-bottom:6px;
-      font-family: ui-monospace, monospace;
-    }
-    #eventLog{
-      max-height:280px;
-      overflow:auto;
-      font-family: ui-monospace, monospace;
-    }
-    .log-item{
-      padding:6px 8px;
-      border-bottom:1px solid rgba(255,255,255,.06);
-      color:#ddd;
-    }
-    .log-alert{ color: var(--alert); }
-
-    /* ===== 地图弹出告警卡 ===== */
-    .alert-card{
-      background:rgba(120,0,0,.85);
-      border:1px solid var(--alert);
-      color:#fff;
-      padding:10px 12px;
-      border-radius:10px;
-      font-size:12px;
-      min-width:240px;
-      box-shadow:0 8px 24px rgba(0,0,0,.45);
-      font-family: ui-monospace, monospace;
-    }
-
-    /* ===== 单位 Marker（国旗 + 标签 + 朝向箭头） ===== */
-    .unit-marker{
-      display:flex;
-      align-items:center;
-      gap:6px;
-      background:rgba(0,0,0,.55);
-      border:1px solid;
-      padding:6px 8px;
-      border-radius:10px;
-      backdrop-filter: blur(4px);
-      transform-origin: center;
-    }
-    .unit-marker img{ width:18px; height:18px; border-radius:3px; }
-    .unit-label{ color:var(--text); font-size:12px; white-space:nowrap; }
-    .unit-heading{
-      width:0;height:0;
-      border-left:6px solid transparent;
-      border-right:6px solid transparent;
-      border-bottom:10px solid var(--mint);
-      opacity:.9;
-      margin-right:2px;
-      transform-origin: 50% 70%;
-    }
-
-    /* 让 marker 不被 HUD 层挡住 */
-    .maplibregl-popup{ z-index: 10000; }
-  </style>
-</head>
-
-<body>
-  <div id="map"></div>
-
-  <div id="hud-topbar">
-    <span class="hud-pill">TACTICAL VIEW</span>
-    <span class="hud-pill">SAT_UPLINK: STABLE</span>
-    <span class="hud-pill">OP_AREA: WEST PACIFIC</span>
-    <span id="hud-clock">--</span>
-  </div>
-  <div id="hud-grid"></div>
-  <div id="hud-scanline"></div>
-
-  <div id="intel-panel">
-    <div class="intel-title">INTELLIGENCE</div>
-    <div class="intel-sub">▶ 拖动时间轴回放；切换事实/推演；事件会自动聚焦与告警。</div>
-
-    <div class="intel-row">
-      <button id="btnFact" class="btn btn-active">事实</button>
-      <button id="btnSim" class="btn">推演</button>
-      <button id="btnPlay" class="btn">播放</button>
-      <button id="btnPause" class="btn">暂停</button>
-    </div>
-
-    <div class="small" id="modeHint">模式：事实（实线航迹）</div>
-    <div style="height:8px"></div>
-    <input id="timeRange" class="range" type="range" min="0" max="1000" step="1" value="1000" />
-    <div class="small" id="timeLabel">时间：--</div>
-
-    <div class="intel-section">
-      <div class="intel-sec-title">EVENT LOG</div>
-      <div id="eventLog"></div>
-    </div>
-  </div>
-
-<script>
-  /* ========= 0) 基础：MapLibre 初始化 ========= */
-  const map = new maplibregl.Map({
-    container: "map",
-    style: "https://demotiles.maplibre.org/style.json",
-    center: [125, 22],
-    zoom: 4
-  });
-  map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
-
-  /* ========= 1) 类型样式（舰/机/海警/商船） ========= */
-  const TYPE_STYLE = {
-    ship:       { color:"#ff4d4f", label:"舰" },
-    aircraft:   { color:"#ffa940", label:"机" },
-    coastguard: { color:"#52c41a", label:"海警" },
-    merchant:   { color:"#40a9ff", label:"商船" }
-  };
-
-  /* ========= 2) 工具函数：时间/插值/航向 ========= */
-  const ms = (iso)=>Date.parse(iso);
-  const lerp = (a,b,t)=>a+(b-a)*t;
-  const lerpCoord = (c1,c2,t)=>[ lerp(c1[0],c2[0],t), lerp(c1[1],c2[1],t) ];
-
-  // 根据 tMs 在带时间点列中插值位置
-  function positionAt(points, tMs){
-    if (!points?.length) return null;
-    const arr = points.map(p=>({m:ms(p.t), c:p.c})).sort((x,y)=>x.m-y.m);
-    if (tMs <= arr[0].m) return arr[0].c;
-    if (tMs >= arr[arr.length-1].m) return arr[arr.length-1].c;
-    for (let i=0;i<arr.length-1;i++){
-      const a=arr[i], b=arr[i+1];
-      if (tMs>=a.m && tMs<=b.m){
-        const r=(tMs-a.m)/((b.m-a.m)||1);
-        return lerpCoord(a.c,b.c,r);
-      }
-    }
-    return arr[arr.length-1].c;
-  }
-
-  // 截取已走过轨迹（用于画航迹）
-  function trackSlice(points, tMs){
-    const arr = points.map(p=>({m:ms(p.t), c:p.c})).sort((x,y)=>x.m-y.m);
-    const out = [];
-    for (const p of arr){ if (p.m <= tMs) out.push(p.c); }
-    const cur = positionAt(points, tMs);
-    if (cur && (!out.length || out[out.length-1][0]!==cur[0] || out[out.length-1][1]!==cur[1])) out.push(cur);
-    return out.length>=2 ? out : null;
-  }
-
-  // 计算航向角（度）：从 c1 指向 c2
-  function bearingDeg(c1, c2){
-    const lon1 = c1[0]*Math.PI/180, lat1 = c1[1]*Math.PI/180;
-    const lon2 = c2[0]*Math.PI/180, lat2 = c2[1]*Math.PI/180;
-    const dLon = lon2 - lon1;
-    const y = Math.sin(dLon) * Math.cos(lat2);
-    const x = Math.cos(lat1)*Math.sin(lat2) - Math.sin(lat1)*Math.cos(lat2)*Math.cos(dLon);
-    let brng = Math.atan2(y, x) * 180/Math.PI;
-    brng = (brng + 360) % 360;
-    return brng;
-  }
-
-  /* ========= 3) 国旗图标（Twemoji SVG，不需要你上传图片） ========= */
-  function twemojiUrl(emoji) {
-    const codePoints = Array.from(emoji).map(ch => ch.codePointAt(0).toString(16)).join("-");
-    return `https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/svg/${codePoints}.svg`;
-  }
-
-  function makeUnitEl(unit){
-    const st = TYPE_STYLE[unit.type] || { color:"#aaa", label:"?" };
-    const el = document.createElement("div");
-    el.className = "unit-marker";
-    el.style.borderColor = st.color;
-
-    // 朝向箭头：独立元素，避免整体旋转影响文字
-    const heading = document.createElement("div");
-    heading.className = "unit-heading";
-    heading.style.borderBottomColor = st.color;
-
-    const img = document.createElement("img");
-    img.src = twemojiUrl(unit.flag);
-
-    const label = document.createElement("div");
-    label.className = "unit-label";
-    label.innerHTML = `<span style="color:${st.color};font-weight:700">[${st.label}]</span> ${unit.name}`;
-
-    el.appendChild(heading);
-    el.appendChild(img);
-    el.appendChild(label);
-
-    // 存个引用方便更新旋转
-    el._headingEl = heading;
-    return el;
-  }
-
-  /* ========= 4) 数据：事实轨迹 + 推演轨迹（示例） =========
-     你后续只需要把 pointsFact/pointsSim 换成真实数据（90天） */
-  const unitTracks = [
-    {
-      id:"us_ddg113", name:"US DDG-113", flag:"🇺🇸", type:"ship",
-      pointsFact:[
-        {t:"2025-09-13T00:00:00Z", c:[121.0, 17.0]},
-        {t:"2025-10-01T00:00:00Z", c:[123.2, 18.1]},
-        {t:"2025-11-01T00:00:00Z", c:[126.5, 20.0]},
-        {t:"2025-12-12T00:00:00Z", c:[129.2, 22.0]}
-      ],
-      pointsSim:[
-        {t:"2025-09-13T00:00:00Z", c:[121.0, 17.0]},
-        {t:"2025-10-15T00:00:00Z", c:[124.5, 18.8]},
-        {t:"2025-11-20T00:00:00Z", c:[127.2, 21.0]},
-        {t:"2025-12-12T00:00:00Z", c:[131.0, 23.2]}
-      ]
-    },
-    {
-      id:"jp_p3c", name:"P-3C", flag:"🇯🇵", type:"aircraft",
-      pointsFact:[
-        {t:"2025-10-20T00:00:00Z", c:[124.0, 20.8]},
-        {t:"2025-11-09T20:02:00Z", c:[125.4, 21.0]},
-        {t:"2025-12-10T00:00:00Z", c:[126.0, 20.7]}
-      ],
-      pointsSim:[
-        {t:"2025-10-20T00:00:00Z", c:[124.0, 20.8]},
-        {t:"2025-11-10T10:00:00Z", c:[126.2, 21.4]},
-        {t:"2025-12-10T00:00:00Z", c:[127.0, 20.9]}
-      ]
-    },
-    {
-      id:"cn_cg5402", name:"CCG 5402", flag:"🇨🇳", type:"coastguard",
-      pointsFact:[
-        {t:"2025-09-20T00:00:00Z", c:[123.0, 25.7]},
-        {t:"2025-10-25T00:00:00Z", c:[123.6, 25.9]},
-        {t:"2025-11-16T00:00:00Z", c:[123.5, 25.9]},
-        {t:"2025-12-12T00:00:00Z", c:[123.2, 25.6]}
-      ],
-      pointsSim:[
-        {t:"2025-09-20T00:00:00Z", c:[123.0, 25.7]},
-        {t:"2025-11-05T00:00:00Z", c:[124.2, 26.1]},
-        {t:"2025-12-12T00:00:00Z", c:[125.0, 26.6]}
-      ]
-    },
-    {
-      id:"mv_evergreen", name:"EVERGREEN", flag:"🇵🇦", type:"merchant",
-      pointsFact:[
-        {t:"2025-09-15T00:00:00Z", c:[118.0, 22.3]},
-        {t:"2025-10-18T00:00:00Z", c:[120.5, 20.9]},
-        {t:"2025-11-25T00:00:00Z", c:[123.0, 19.2]},
-        {t:"2025-12-12T00:00:00Z", c:[125.5, 18.0]}
-      ],
-      pointsSim:[
-        {t:"2025-09-15T00:00:00Z", c:[118.0, 22.3]},
-        {t:"2025-10-20T00:00:00Z", c:[121.8, 21.2]},
-        {t:"2025-12-12T00:00:00Z", c:[127.2, 19.0]}
-      ]
-    }
-  ];
-
-  /* ========= 5) 事件（按真实时间触发：事实/推演可共享，也可分开） ========= */
-  const scenarioEvents = [
-    { t:"2025-11-09T20:02:00Z", unitId:"jp_p3c", title:"抵近侦察", desc:"日方 P-3C 持续跟踪监视", level:"ALERT" },
-    { t:"2025-11-10T02:00:00Z", unitId:"us_ddg113", title:"海域介入", desc:"美舰 DDG-113 进入相关海域", level:"ALERT" },
-    { t:"2025-11-16T00:00:00Z", unitId:"cn_cg5402", title:"海警巡航", desc:"争议海域海警活动引发舆论升温", level:"INFO" }
-  ].map(e=>({ ...e, m: ms(e.t) }));
-
-  /* ========= 6) UI & 状态 ========= */
-  const eventLog = document.getElementById("eventLog");
-  const timeRangeEl = document.getElementById("timeRange");
-  const timeLabelEl = document.getElementById("timeLabel");
-  const modeHintEl = document.getElementById("modeHint");
-  const hudClockEl = document.getElementById("hud-clock");
-
-  const btnFact = document.getElementById("btnFact");
-  const btnSim  = document.getElementById("btnSim");
-  const btnPlay = document.getElementById("btnPlay");
-  const btnPause= document.getElementById("btnPause");
-
-  let mode = "fact";       // "fact" | "sim"
-  let playing = false;
-  let currentT = null;
-  const fired = new Set();
-
-  function addLog(text, isAlert=false){
-    const div = document.createElement("div");
-    div.className = "log-item" + (isAlert ? " log-alert" : "");
-    div.textContent = text;
-    eventLog.prepend(div);
-  }
-
-  function showAlertOnMap(lngLat, title, desc){
-    new maplibregl.Popup({ closeButton:true, closeOnClick:true, maxWidth:"320px" })
-      .setLngLat(lngLat)
-      .setHTML(`
-        <div class="alert-card">
-          <div style="font-weight:700;margin-bottom:6px">⚠ ALERT：${title}</div>
-          <div style="opacity:.95">${desc}</div>
-        </div>
-      `)
-      .addTo(map);
-  }
-
-  function setClock(tMs){
-    const d = new Date(tMs);
-    const s = d.toISOString().replace("T"," ").slice(0,19) + " UTC";
-    hudClockEl.textContent = s;
-    timeLabelEl.textContent = "时间：" + s;
-  }
-
-  function setMode(next){
-    mode = next;
-    btnFact.classList.toggle("btn-active", mode==="fact");
-    btnSim.classList.toggle("btn-active", mode==="sim");
-    modeHintEl.textContent = mode==="fact" ? "模式：事实（实线航迹）" : "模式：推演（虚线航迹）";
-
-    // 轨迹线型切换
-    if (map.getLayer("unit-trails-line")){
-      map.setPaintProperty("unit-trails-line", "line-dasharray", mode==="fact" ? [1,0] : [2,2]);
-      map.setPaintProperty("unit-trails-line", "line-opacity", mode==="fact" ? 0.75 : 0.85);
-      map.setPaintProperty("unit-trails-line", "line-color", mode==="fact" ? "#40a9ff" : "#ff4d4f");
-    }
-    // 切换后重新刷新（位置/轨迹）
-    updateAt(currentT, {refire:false});
-  }
-
-  btnFact.onclick = ()=>setMode("fact");
-  btnSim.onclick  = ()=>setMode("sim");
-  btnPlay.onclick = ()=>{ playing = true; };
-  btnPause.onclick= ()=>{ playing = false; };
-
-  /* ========= 7) 全局时间范围（从所有轨迹抽取） ========= */
-  function getAllTimes(){
-    const times=[];
-    for (const u of unitTracks){
-      const pts = (mode==="fact" ? u.pointsFact : u.pointsSim);
-      pts.forEach(p=>times.push(ms(p.t)));
-    }
-    times.sort((a,b)=>a-b);
-    return times;
-  }
-
-  /* ========= 8) 单位 Marker + 航迹 Source ========= */
-  const unitMarkers = new Map(); // id -> { marker, el }
-  const trailFC = { type:"FeatureCollection", features: [] };
-
-  function pointsForUnit(u){
-    return (mode==="fact" ? u.pointsFact : u.pointsSim);
-  }
-
-  function rebuildTrails(tMs){
-    trailFC.features = unitTracks.map(u=>{
-      const coords = trackSlice(pointsForUnit(u), tMs) || [];
-      return {
-        type:"Feature",
-        properties:{ id:u.id, name:u.name, type:u.type },
-        geometry:{ type:"LineString", coordinates: coords }
-      };
-    });
-    map.getSource("unit-trails").setData(trailFC);
-  }
-
-  // 用于事件聚焦的高亮点
-  const focusFC = { type:"FeatureCollection", features: [] };
-  let focusPulseTimer = null;
-
-  function focusPulseAt(lngLat){
-    focusFC.features = [{
-      type:"Feature",
-      properties:{},
-      geometry:{ type:"Point", coordinates:[lngLat.lng, lngLat.lat] }
-    }];
-    map.getSource("focus-point").setData(focusFC);
-
-    // 简单脉冲动画：改 circle-radius
-    let r=6, dir=1;
-    if (focusPulseTimer) clearInterval(focusPulseTimer);
-    focusPulseTimer = setInterval(()=>{
-      r += dir*1.2;
-      if (r > 26) dir = -1;
-      if (r < 8) dir = 1;
-      if (map.getLayer("focus-ring")) map.setPaintProperty("focus-ring", "circle-radius", r);
-    }, 60);
-
-    // 3秒后停止脉冲但保留一下高亮，然后淡出
-    setTimeout(()=>{
-      if (focusPulseTimer) clearInterval(focusPulseTimer);
-      focusPulseTimer = null;
-      // 逐步淡出
-      let op=0.85;
-      const fade = setInterval(()=>{
-        op -= 0.08;
-        if (op <= 0){
-          clearInterval(fade);
-          focusFC.features = [];
-          map.getSource("focus-point").setData(focusFC);
-          return;
+    <style>
+        /* 全局军事风格定义 */
+        body {
+            font-family: 'Share Tech Mono', 'Noto Sans SC', monospace;
+            background-color: #0f1115;
+            color: #a3c2c2;
+            overflow: hidden;
         }
-        if (map.getLayer("focus-ring")) map.setPaintProperty("focus-ring", "circle-opacity", op);
-      }, 80);
-    }, 3000);
-  }
 
-  function fireEventsIfNeeded(tMs){
-    // 这里：事件不区分事实/推演；如果你想区分，可给事件加 mode 字段过滤
-    scenarioEvents.forEach((ev, idx)=>{
-      if (fired.has(idx)) return;
-      if (tMs >= ev.m){
-        fired.add(idx);
-        const mk = unitMarkers.get(ev.unitId)?.marker;
-        if (!mk) return;
-        const pos = mk.getLngLat();
+        /* 模拟 CRT 扫描线效果 */
+        .scanlines {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+            background-size: 100% 2px, 3px 100%;
+            pointer-events: none;
+            z-index: 9999;
+        }
 
-        const isAlert = (ev.level === "ALERT");
-        addLog(`${ev.level}：${ev.title} - ${ev.desc}`, isAlert);
-        if (isAlert) showAlertOnMap(pos, ev.title, ev.desc);
+        /* 地图容器 */
+        #map {
+            height: 100vh;
+            width: 100vw;
+            background: #000;
+            z-index: 1;
+        }
 
-        // C) 事件聚焦：flyTo + 高亮脉冲
-        map.flyTo({
-          center: [pos.lng, pos.lat],
-          zoom: 6.2,
-          speed: 0.9,
-          curve: 1.2,
-          essential: true
+        /* 自定义滑块样式 */
+        input[type=range] {
+            -webkit-appearance: none;
+            background: transparent;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 16px;
+            width: 16px;
+            border-radius: 50%;
+            background: #00ffcc;
+            cursor: pointer;
+            margin-top: -6px;
+            box-shadow: 0 0 10px #00ffcc;
+        }
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 4px;
+            cursor: pointer;
+            background: #334444;
+            border-radius: 2px;
+        }
+
+        /* V2.0 新增: 战术单位标记样式 */
+        .tactical-marker {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 60px !important; 
+            height: 60px !important;
+            background: transparent !important;
+            border: none !important;
+        }
+        
+        .flag-container {
+            position: relative;
+            width: 40px;
+            height: 25px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.8);
+            border: 1px solid rgba(255,255,255,0.3);
+            background: #000;
+        }
+        
+        .flag-img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+
+        .unit-label {
+            margin-top: 2px;
+            background: rgba(0, 0, 0, 0.85);
+            color: #00ffcc;
+            font-size: 10px;
+            padding: 1px 4px;
+            border: 1px solid #00ffcc;
+            border-radius: 2px;
+            white-space: nowrap;
+            text-shadow: 0 0 2px #000;
+            font-weight: bold;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+            font-family: 'Noto Sans SC', sans-serif;
+        }
+        
+        .unit-cn .unit-label { color: #ff3333; border-color: #ff3333; }
+        .unit-us .unit-label { color: #00ccff; border-color: #00ccff; }
+        .unit-jp .unit-label { color: #33ff33; border-color: #33ff33; }
+
+        /* 战术事件弹窗样式 */
+        .leaflet-popup-content-wrapper {
+            background: rgba(20, 0, 0, 0.9);
+            border: 1px solid #ff3333;
+            border-radius: 0;
+            color: #ffcccc;
+            font-family: 'Share Tech Mono', 'Noto Sans SC', monospace;
+            box-shadow: 0 0 15px rgba(255, 0, 0, 0.4);
+        }
+        .leaflet-popup-tip {
+            background: #ff3333;
+        }
+        .event-popup-title {
+            color: #ff3333;
+            font-weight: bold;
+            border-bottom: 1px solid #550000;
+            margin-bottom: 4px;
+            padding-bottom: 2px;
+            font-size: 14px;
+            text-transform: uppercase;
+        }
+
+        /* V3.2 新增: 路径节点日期标签样式 */
+        .node-label {
+            background: transparent;
+            border: none;
+            box-shadow: none;
+            color: rgba(255, 255, 255, 0.7);
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 10px;
+            font-weight: bold;
+            text-shadow: 1px 1px 0 #000;
+        }
+        .node-label-cn { color: #ff9999; }
+        .node-label-us { color: #99ccff; }
+        .node-label-jp { color: #99ff99; }
+
+        /* 玻璃拟态面板 */
+        .glass-panel {
+            background: rgba(10, 15, 20, 0.85);
+            backdrop-filter: blur(4px);
+            border: 1px solid rgba(0, 255, 204, 0.2);
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.5);
+        }
+
+        /* V3.0 编辑器弹窗样式 */
+        .modal-overlay {
+            background: rgba(0, 0, 0, 0.9);
+            z-index: 99999;
+        }
+        .json-editor {
+            background: #1a1a1a;
+            color: #00ffcc;
+            font-family: 'Courier New', monospace;
+            border: 1px solid #333;
+            font-size: 12px;
+        }
+        .json-editor:focus {
+            outline: none;
+            border-color: #00ffcc;
+            box-shadow: 0 0 10px rgba(0, 255, 204, 0.2);
+        }
+    </style>
+</head>
+<body>
+
+    <!-- CRT 滤镜层 -->
+    <div class="scanlines"></div>
+
+    <!-- 顶部状态栏 -->
+    <div class="fixed top-0 left-0 w-full glass-panel h-12 flex items-center justify-between px-6 z-50 text-xs md:text-sm">
+        <div class="flex items-center gap-4">
+            <span class="text-emerald-400 font-bold tracking-widest animate-pulse">● 战术态势感知</span>
+            <span class="text-gray-500">|</span>
+            <span>卫星链路: <span class="text-green-500">在线</span></span>
+            <span class="hidden md:inline">|</span>
+            <span class="hidden md:inline">战区: 西太平洋 (N10-N45)</span>
+        </div>
+        <div class="flex items-center gap-4">
+            <button onclick="toggleEditor()" class="border border-emerald-500 text-emerald-500 px-3 py-1 hover:bg-emerald-900 transition-colors text-xs font-bold">
+                <i class="fas fa-terminal"></i> 数据注入
+            </button>
+            <span id="system-clock" class="text-xl font-bold text-white">2025-10-01 00:00</span>
+        </div>
+    </div>
+
+    <!-- 左侧情报面板 -->
+    <div class="fixed top-16 left-4 w-64 md:w-80 glass-panel p-4 z-40 rounded-sm hidden md:block">
+        <h3 class="text-emerald-400 border-b border-emerald-900 pb-2 mb-2 font-bold flex justify-between">
+            <span>情报综述</span>
+            <i class="fas fa-radar"></i>
+        </h3>
+        <div id="unit-details" class="text-sm space-y-3 min-h-[150px]">
+            <p class="text-gray-400 italic">>> 点击地图上的单位查看详情...</p>
+            <div class="mt-4 border-t border-gray-700 pt-2">
+                <div class="text-xs text-gray-500 mb-1">即时战报 (LOG)</div>
+                <div class="h-32 overflow-hidden relative">
+                    <div id="news-ticker" class="absolute w-full space-y-2 text-xs text-gray-300">
+                        <!-- JS populate -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- V3.3 新增: 右侧图例面板 -->
+    <div class="fixed top-16 right-4 w-auto glass-panel p-4 z-40 rounded-sm hidden md:block min-w-[180px]">
+        <h3 class="text-emerald-400 border-b border-emerald-900 pb-2 mb-3 font-bold text-xs flex justify-between items-center">
+            <span>战场识别图例</span>
+            <i class="fas fa-list-ul"></i>
+        </h3>
+        <div id="legend-content" class="space-y-3">
+            <!-- JS 将动态填充这里 -->
+        </div>
+    </div>
+
+    <!-- 底部控制栏 -->
+    <div class="fixed bottom-0 left-0 w-full glass-panel p-4 z-50 flex flex-col gap-2">
+        <div class="flex justify-between items-end mb-1">
+            <div class="text-xs text-emerald-500">推演时间轴控制</div>
+            <div class="text-xs text-gray-400">推演速度: <span id="speed-display">1x</span></div>
+        </div>
+        
+        <div class="flex items-center gap-4">
+            <button id="play-btn" class="text-emerald-400 hover:text-white transition-colors border border-emerald-900 hover:border-emerald-500 px-4 py-1 rounded">
+                <i class="fas fa-play"></i>
+            </button>
+            <input type="range" id="time-slider" min="0" max="100" value="0" class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer">
+            <div class="w-24 text-right text-sm font-bold text-white" id="current-date-display">10/01</div>
+        </div>
+    </div>
+
+    <!-- 数据编辑器 Modal -->
+    <div id="editor-modal" class="hidden fixed inset-0 modal-overlay flex items-center justify-center p-4">
+        <div class="bg-gray-900 border border-emerald-500 w-full max-w-4xl h-[80vh] flex flex-col shadow-[0_0_50px_rgba(0,255,204,0.2)]">
+            <div class="flex justify-between items-center p-3 border-b border-emerald-900 bg-gray-800">
+                <h3 class="text-emerald-400 font-bold"><i class="fas fa-database"></i> 任务数据编辑器</h3>
+                <button onclick="toggleEditor()" class="text-gray-400 hover:text-white"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="flex-1 p-4 flex flex-col gap-2">
+                <div class="text-xs text-gray-400 mb-1">请粘贴JSON格式的情报数据 (包含 units 和 milestones 数组):</div>
+                <textarea id="json-input" class="flex-1 w-full json-editor p-4 rounded"></textarea>
+            </div>
+            <div class="p-3 border-t border-emerald-900 bg-gray-800 flex justify-end gap-3">
+                <button onclick="loadDefaultScenario()" class="px-4 py-2 text-xs text-gray-400 hover:text-white border border-gray-600 hover:border-gray-400">
+                    <i class="fas fa-undo"></i> 加载默认演示
+                </button>
+                <button onclick="processInputData()" class="px-4 py-2 text-xs font-bold text-black bg-emerald-500 hover:bg-emerald-400">
+                    <i class="fas fa-upload"></i> 上传并渲染
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 地图容器 -->
+    <div id="map"></div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+    <script>
+        // --- 全局变量 ---
+        let units = [];
+        let milestones = [];
+        let START_DATE = new Date("2025-10-01").getTime();
+        let END_DATE = new Date("2025-12-15").getTime();
+        
+        // 动画控制
+        let isPlaying = false;
+        let animationFrameId;
+
+        // 初始化地图
+        const map = L.map('map', {
+            zoomControl: false,
+            attributionControl: false
+        }).setView([25.0, 125.0], 5);
+
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            maxZoom: 19,
+            subdomains: 'abcd'
+        }).addTo(map);
+
+        L.control.scale({ position: 'bottomright' }).addTo(map);
+
+        // --- 默认演示数据 (Template) ---
+        const defaultScenario = {
+            startDate: "2025-10-01",
+            endDate: "2025-12-15",
+            milestones: [
+                { time: "2025-10-15", lat: 10.5, lng: 112.5, title: "美舰闯入", msg: "DDG-113 进入南沙相关海域" },
+                { time: "2025-11-05", lat: 21.0, lng: 121.0, title: "突破岛链", msg: "山东舰编队穿越巴士海峡" },
+                { time: "2025-11-08", lat: 24.5, lng: 125.5, title: "抵近侦察", msg: "日方 P-3C 持续跟踪监视" },
+                { time: "2025-12-01", lat: 34.5, lng: 129.5, title: "战略通道", msg: "055编队穿越对马海峡" }
+            ],
+            units: [
+                {
+                    id: "cn-cv17", shortLabel: "中国 山东舰", type: "Carrier", country: "cn", flagCode: "cn",
+                    details: "山东舰航母战斗群。任务：远海实战化对抗演练。",
+                    path: [
+                        { time: "2025-10-25", lat: 18.2, lng: 109.5 },
+                        { time: "2025-11-05", lat: 21.3, lng: 122.0 },
+                        { time: "2025-11-20", lat: 20.0, lng: 132.0 },
+                        { time: "2025-12-05", lat: 18.2, lng: 109.5 }
+                    ]
+                },
+                {
+                    id: "us-ddg", shortLabel: "美国 DDG-113", type: "Destroyer", country: "us", flagCode: "us",
+                    details: "伯克级驱逐舰。任务：自由航行行动 (FONOP)。",
+                    path: [
+                        { time: "2025-10-10", lat: 1.3, lng: 104.0 },
+                        { time: "2025-10-15", lat: 10.0, lng: 112.0 },
+                        { time: "2025-11-01", lat: 15.0, lng: 118.0 },
+                        { time: "2025-11-15", lat: 26.0, lng: 128.0 }
+                    ]
+                },
+                {
+                    id: "jp-p3c", shortLabel: "日本 P-3C", type: "Patrol Air", country: "jp", flagCode: "jp",
+                    details: "日本海自第5航空群。任务：反潜警戒。",
+                    path: [
+                        { time: "2025-11-03", lat: 26.2, lng: 127.7 },
+                        { time: "2025-11-06", lat: 23.0, lng: 124.0 },
+                        { time: "2025-11-12", lat: 26.2, lng: 127.7 }
+                    ]
+                },
+                {
+                    id: "cn-055", shortLabel: "中国 055拉萨舰", type: "Destroyer", country: "cn", flagCode: "cn",
+                    details: "万吨大驱编队。任务：远海训练。",
+                    path: [
+                        { time: "2025-11-25", lat: 31.0, lng: 123.0 },
+                        { time: "2025-12-01", lat: 34.5, lng: 129.5 },
+                        { time: "2025-12-10", lat: 41.0, lng: 132.0 }
+                    ]
+                }
+            ]
+        };
+
+        // 填充编辑器默认值
+        document.getElementById('json-input').value = JSON.stringify(defaultScenario, null, 4);
+
+        // --- 核心逻辑引擎 ---
+
+        function getCountryColor(code) {
+            if(code === 'cn') return '#ff3333';
+            if(code === 'us') return '#00ccff';
+            if(code === 'jp') return '#33ff33';
+            return '#ffff00';
+        }
+
+        // V3.3: 动态更新图例
+        function updateLegend(units) {
+            const container = document.getElementById('legend-content');
+            container.innerHTML = '';
+            
+            // 提取唯一的国家
+            const countryMap = new Map();
+            units.forEach(u => {
+                if (!countryMap.has(u.country)) {
+                    countryMap.set(u.country, u.flagCode);
+                }
+            });
+
+            countryMap.forEach((flagCode, country) => {
+                const color = getCountryColor(country);
+                const div = document.createElement('div');
+                div.className = "flex items-center gap-3 text-xs bg-black/30 p-2 rounded border border-gray-800";
+                div.innerHTML = `
+                    <div class="w-8 h-5 border border-gray-500 shadow-sm relative overflow-hidden">
+                        <img src="https://flagcdn.com/w40/${flagCode}.png" class="w-full h-full object-cover">
+                    </div>
+                    <div class="flex-1 flex flex-col justify-center">
+                        <span class="text-gray-300 font-bold mb-1 leading-none tracking-wide">${country.toUpperCase()}</span>
+                        <div class="flex items-center">
+                             <div class="h-0.5 w-full" style="background-color: ${color}; box-shadow: 0 0 5px ${color}; opacity: 0.8;"></div>
+                        </div>
+                    </div>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        // 初始化场景数据
+        function initScenario(data) {
+            // 1. 清理现有地图元素
+            units.forEach(u => {
+                if(u.marker) map.removeLayer(u.marker);
+                if(u.trail) map.removeLayer(u.trail);
+                if(u.plannedTrail) map.removeLayer(u.plannedTrail);
+                if(u.nodes) u.nodes.forEach(n => map.removeLayer(n));
+            });
+            milestones.forEach(m => {
+                if(m.popup) map.removeLayer(m.popup);
+            });
+            
+            // 2. 更新时间范围
+            if (data.startDate) START_DATE = new Date(data.startDate).getTime();
+            if (data.endDate) END_DATE = new Date(data.endDate).getTime();
+            
+            const slider = document.getElementById('time-slider');
+            slider.min = START_DATE;
+            slider.max = END_DATE;
+            slider.value = START_DATE;
+
+            // 3. 处理 Milestone
+            milestones = data.milestones || [];
+            milestones.forEach(m => {
+                m.timestamp = new Date(m.time).getTime();
+                m.popup = L.popup({
+                    closeButton: false,
+                    autoClose: false,
+                    closeOnClick: false,
+                    className: 'event-popup'
+                })
+                .setLatLng([m.lat, m.lng])
+                .setContent(`
+                    <div class="event-popup-title"><i class="fas fa-exclamation-triangle"></i> ${m.title}</div>
+                    <div class="text-xs">${m.msg}</div>
+                `);
+            });
+
+            // 4. 处理 Units
+            units = data.units || [];
+            units.forEach(u => {
+                // 预处理路径时间戳
+                u.path.forEach(p => p.timestamp = new Date(p.time).getTime());
+                u.nodes = []; // 存储节点marker
+
+                // V3.2: 绘制完整“计划路径” (背景虚线)
+                const fullPathPoints = u.path.map(p => [p.lat, p.lng]);
+                u.plannedTrail = L.polyline(fullPathPoints, {
+                    color: getCountryColor(u.country),
+                    weight: 1,
+                    opacity: 0.3,
+                    dashArray: '3, 6', // 细虚线
+                    interactive: false
+                }).addTo(map);
+
+                // V3.2: 绘制关键节点 (带日期标签)
+                u.path.forEach(p => {
+                    const dateStr = new Date(p.time).toLocaleDateString('zh-CN', {month: '2-digit', day: '2-digit'});
+                    
+                    // 节点小圆点
+                    const nodeMarker = L.circleMarker([p.lat, p.lng], {
+                        radius: 2,
+                        color: getCountryColor(u.country),
+                        fillColor: '#000',
+                        fillOpacity: 1,
+                        weight: 1,
+                        opacity: 0.6
+                    }).addTo(map);
+
+                    // 永久显示的日期标签
+                    nodeMarker.bindTooltip(dateStr, {
+                        permanent: true,
+                        direction: 'bottom',
+                        className: `node-label node-label-${u.country}`,
+                        offset: [0, 5]
+                    });
+                    
+                    u.nodes.push(nodeMarker);
+                });
+                
+                // 创建动态 Unit Marker (初始隐藏)
+                const flagUrl = `https://flagcdn.com/w80/${u.flagCode}.png`;
+                u.marker = L.marker([0,0], {
+                    icon: L.divIcon({
+                        className: 'tactical-marker',
+                        html: `
+                            <div class="flag-container">
+                                <img src="${flagUrl}" class="flag-img">
+                            </div>
+                            <div class="unit-label unit-${u.country}">${u.shortLabel}</div>
+                        `,
+                        iconSize: [60, 60],
+                        iconAnchor: [30, 30]
+                    })
+                }).bindTooltip(u.details, { 
+                    direction: 'top',
+                    offset: [0, -20],
+                    className: 'bg-black text-white border border-gray-600 font-mono text-xs' 
+                });
+
+                // 创建动态轨迹线 (实线/亮虚线)
+                u.trail = L.polyline([], {
+                    color: getCountryColor(u.country),
+                    weight: 2,
+                    opacity: 0.8,
+                    dashArray: '4, 4' // 动态部分的样式
+                }).addTo(map);
+            });
+            
+            // V3.3: 更新图例
+            updateLegend(units);
+            
+            // 重置日志
+            document.getElementById('news-ticker').innerHTML = '';
+            addLog("系统: 新演习剧本加载成功。");
+            
+            // 立即刷新一次
+            updateSimulation(START_DATE);
+        }
+
+        function updateSimulation(currentTime) {
+            // Safety Check: 防止无效时间戳导致的计算错误
+            if (isNaN(currentTime)) return;
+
+            const dateObj = new Date(currentTime);
+            document.getElementById('system-clock').innerText = dateObj.toISOString().replace('T', ' ').substring(0, 16);
+            document.getElementById('current-date-display').innerText = `${dateObj.getMonth()+1}/${dateObj.getDate()}`;
+
+            // A. 更新单位位置
+            units.forEach(unit => {
+                const path = unit.path;
+                
+                // 检查单位是否存在于该时间段 (需要确保时间戳有效)
+                // 注意：计划路径和节点始终显示，只有 Marker 和已走路径会隐藏/显示
+                if (path.length === 0 || isNaN(path[0].timestamp) || isNaN(path[path.length-1].timestamp)) return;
+
+                if (currentTime < path[0].timestamp || currentTime > path[path.length-1].timestamp) {
+                    if (map.hasLayer(unit.marker)) map.removeLayer(unit.marker);
+                    if (map.hasLayer(unit.trail)) map.removeLayer(unit.trail);
+                    return;
+                }
+
+                if (!map.hasLayer(unit.marker)) unit.marker.addTo(map);
+                if (!map.hasLayer(unit.trail)) unit.trail.addTo(map);
+
+                // 插值计算
+                let currentPos = null;
+                for (let i = 0; i < path.length - 1; i++) {
+                    const p1 = path[i];
+                    const p2 = path[i+1];
+                    
+                    // 防御性编程: 确保时间戳有效
+                    if (isNaN(p1.timestamp) || isNaN(p2.timestamp)) continue;
+
+                    if (currentTime >= p1.timestamp && currentTime <= p2.timestamp) {
+                        const duration = p2.timestamp - p1.timestamp;
+                        // 防御性编程: 防止除以零
+                        let ratio = 0;
+                        if (duration > 0) {
+                            ratio = (currentTime - p1.timestamp) / duration;
+                        }
+                        
+                        // 确保 ratio 在 0-1 之间
+                        ratio = Math.max(0, Math.min(1, ratio));
+
+                        const lat = p1.lat + (p2.lat - p1.lat) * ratio;
+                        const lng = p1.lng + (p2.lng - p1.lng) * ratio;
+                        
+                        // 只有当坐标有效时才更新
+                        if (!isNaN(lat) && !isNaN(lng)) {
+                            currentPos = [lat, lng];
+                        }
+                        break;
+                    }
+                }
+
+                if (currentPos) {
+                    unit.marker.setLatLng(currentPos);
+                    unit.marker.setZIndexOffset(1000); 
+                    
+                    const trailPoints = path.filter(p => p.timestamp <= currentTime).map(p => [p.lat, p.lng]);
+                    trailPoints.push(currentPos);
+                    unit.trail.setLatLngs(trailPoints);
+                }
+            });
+
+            // B. 检查关键事件
+            milestones.forEach(m => {
+                if (isNaN(m.timestamp)) return;
+                const timeDiff = currentTime - m.timestamp;
+                if (timeDiff >= 0 && timeDiff < 172800000) { // 48小时内显示
+                    if (!map.hasLayer(m.popup)) {
+                        map.openPopup(m.popup);
+                        addLog(`⚠️ 警告: ${m.title} - ${m.msg}`);
+                    }
+                } else {
+                    if (map.hasLayer(m.popup)) {
+                        map.closePopup(m.popup);
+                    }
+                }
+            });
+        }
+
+        let lastLog = "";
+        function addLog(msg) {
+            if (msg === lastLog) return;
+            lastLog = msg;
+            const ticker = document.getElementById('news-ticker');
+            const div = document.createElement('div');
+            div.className = "border-b border-gray-800 pb-1 text-emerald-400 font-bold";
+            if (msg.includes("警告")) div.className = "border-b border-gray-800 pb-1 text-red-400 font-bold";
+            div.innerText = "> " + msg;
+            ticker.prepend(div);
+        }
+
+        // --- 编辑器功能 ---
+        function toggleEditor() {
+            const el = document.getElementById('editor-modal');
+            el.classList.toggle('hidden');
+        }
+
+        function loadDefaultScenario() {
+            document.getElementById('json-input').value = JSON.stringify(defaultScenario, null, 4);
+        }
+
+        function processInputData() {
+            const rawText = document.getElementById('json-input').value;
+            try {
+                const data = JSON.parse(rawText);
+                
+                // 简单校验
+                if (!data.units || !Array.isArray(data.units)) {
+                    throw new Error("Invalid JSON: 'units' array missing.");
+                }
+                
+                initScenario(data);
+                toggleEditor();
+                
+            } catch (e) {
+                alert("数据解析失败! 请检查JSON格式。\n错误信息: " + e.message);
+            }
+        }
+
+        // --- 播放控制 ---
+        const slider = document.getElementById('time-slider');
+        const playBtn = document.getElementById('play-btn');
+        const icon = playBtn.querySelector('i');
+
+        slider.addEventListener('input', (e) => {
+            const val = parseInt(e.target.value);
+            updateSimulation(val);
+            if (isPlaying) pauseSimulation();
         });
-        focusPulseAt(pos);
-      }
-    });
-  }
 
-  /* ========= 9) 核心更新：位置/朝向/航迹/事件 ========= */
-  function updateAt(tMs, opt={refire:true}){
-    if (!tMs) return;
-    currentT = tMs;
-    setClock(tMs);
+        playBtn.addEventListener('click', () => {
+            if (isPlaying) {
+                pauseSimulation();
+            } else {
+                startSimulation();
+            }
+        });
 
-    for (const u of unitTracks){
-      const pts = pointsForUnit(u);
-      const pos = positionAt(pts, tMs);
-      if (!pos) continue;
+        function startSimulation() {
+            isPlaying = true;
+            icon.className = "fas fa-pause";
+            loop();
+        }
 
-      const entry = unitMarkers.get(u.id);
-      entry.marker.setLngLat(pos);
+        function pauseSimulation() {
+            isPlaying = false;
+            icon.className = "fas fa-play";
+            cancelAnimationFrame(animationFrameId);
+        }
 
-      // A) 朝向：用一个小时间增量计算 bearing
-      const dt = 60 * 60 * 1000; // 1小时
-      const p1 = positionAt(pts, Math.max(tMs - dt, ms(pts[0].t)));
-      const p2 = positionAt(pts, Math.min(tMs + dt, ms(pts[pts.length-1].t)));
-      const br = (p1 && p2) ? bearingDeg(p1, p2) : 0;
-      // 只旋转箭头，不旋转文字/旗帜
-      entry.el._headingEl.style.transform = `rotate(${br}deg)`;
-    }
+        function loop() {
+            let current = parseInt(slider.value);
+            current += 3600000 * 4; // 速度
+            
+            if (current >= END_DATE) {
+                current = START_DATE;
+                map.closePopup();
+            }
 
-    rebuildTrails(tMs);
-    fireEventsIfNeeded(tMs);
-  }
+            slider.value = current;
+            updateSimulation(current);
 
-  /* ========= 10) 时间轴（0..1000 -> tMin..tMax） & 播放 ========= */
-  function computeRange(){
-    const times = getAllTimes();
-    return { tMin: times[0], tMax: times[times.length-1] };
-  }
-  let { tMin, tMax } = computeRange();
+            if (isPlaying) {
+                animationFrameId = requestAnimationFrame(loop);
+            }
+        }
+        
+        // 初始填充一些背景 Log
+        const tickerContainer = document.getElementById('news-ticker');
+        ["系统: 启动序列完成", "链路: OSINT 数据库已连接", "扫描: 区域 N10-N45 无异常"].forEach(news => {
+             const div = document.createElement('div');
+             div.className = "border-b border-gray-800 pb-1 text-gray-500";
+             div.innerText = "> " + news;
+             tickerContainer.appendChild(div);
+        });
 
-  timeRangeEl.oninput = ()=>{
-    playing = false;
-    const k = Number(timeRangeEl.value)/1000;
-    const t = tMin + (tMax - tMin) * k;
-    updateAt(t);
-  };
+        // 启动加载
+        initScenario(defaultScenario);
 
-  function loop(){
-    if (playing){
-      // 播放速度：每秒推进 6小时（可调）
-      const speedMsPerSec = 6 * 3600 * 1000;
-      currentT += speedMsPerSec / 60; // 约按 60fps
-      if (currentT >= tMax){
-        currentT = tMax;
-        playing = false;
-      }
-      const k = (currentT - tMin)/(tMax - tMin);
-      timeRangeEl.value = String(Math.round(k*1000));
-      updateAt(currentT);
-    }
-    requestAnimationFrame(loop);
-  }
-
-  /* ========= 11) 地图加载后：创建 Marker、轨迹层、高亮层 ========= */
-  map.on("load", ()=>{
-    // 轨迹层：每个单位一条线（颜色可扩展到按类型/按阵营）
-    map.addSource("unit-trails", { type:"geojson", data: trailFC });
-    map.addLayer({
-      id:"unit-trails-line",
-      type:"line",
-      source:"unit-trails",
-      paint:{
-        "line-color":"#40a9ff",
-        "line-width":2,
-        "line-opacity":0.75,
-        "line-dasharray":[1,0] // 事实=实线；推演会切成虚线
-      }
-    });
-
-    // 高亮层（事件聚焦脉冲）
-    map.addSource("focus-point", { type:"geojson", data: focusFC });
-    map.addLayer({
-      id:"focus-ring",
-      type:"circle",
-      source:"focus-point",
-      paint:{
-        "circle-radius": 10,
-        "circle-color": "transparent",
-        "circle-stroke-width": 2,
-        "circle-stroke-color": "#ff4d4f",
-        "circle-opacity": 0.85
-      }
-    });
-
-    // 创建单位 marker
-    for (const u of unitTracks){
-      const el = makeUnitEl(u);
-      const st = TYPE_STYLE[u.type] || { color:"#aaa" };
-      el.style.borderColor = st.color;
-
-      const pts = pointsForUnit(u);
-      const pos = positionAt(pts, ms(pts[0].t));
-      const marker = new maplibregl.Marker({ element: el }).setLngLat(pos).addTo(map);
-
-      unitMarkers.set(u.id, { marker, el });
-
-      // 点击单位：日志提示 + 轻微聚焦
-      el.addEventListener("click", (ev)=>{
-        ev.stopPropagation();
-        const ll = marker.getLngLat();
-        addLog(`INFO：选择单位 - ${u.name}`, false);
-        map.easeTo({ center:[ll.lng,ll.lat], zoom: Math.max(map.getZoom(), 6), duration: 600 });
-        focusPulseAt(ll);
-      });
-    }
-
-    // 初始化时间范围与当前时间（默认最后一天）
-    ({ tMin, tMax } = computeRange());
-    currentT = tMax;
-    timeRangeEl.value = "1000";
-    updateAt(currentT);
-
-    // 初始日志
-    addLog("INFO：系统就绪 - HUD ONLINE", false);
-    addLog("INFO：提示 - 可切换事实/推演并播放时间轴", false);
-
-    // 进入主循环
-    loop();
-  });
-
-  // 切换模式时，需要重算 tMin/tMax（因为 sim 的轨迹点可能不同）
-  function refreshRangeAndStay(){
-    ({ tMin, tMax } = computeRange());
-    currentT = Math.max(tMin, Math.min(currentT, tMax));
-    const k = (currentT - tMin)/(tMax - tMin);
-    timeRangeEl.value = String(Math.round(k*1000));
-    updateAt(currentT);
-  }
-
-  // 覆盖 setMode：切换后重算范围
-  const _setMode = setMode;
-  window.setMode = (m)=>{
-    _setMode(m);
-    refreshRangeAndStay();
-  };
-
-  // 让按钮切换调用 window.setMode（兼容上面覆盖）
-  btnFact.onclick = ()=>window.setMode("fact");
-  btnSim.onclick  = ()=>window.setMode("sim");
-</script>
+    </script>
 </body>
 </html>
